@@ -1,0 +1,6 @@
+{
+  "name": "ExamForge",
+  "description": "AI-powered student study studio that transforms lecture PDFs and notes into interactive mock exams with AI lecturer grading and simple analogies.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
