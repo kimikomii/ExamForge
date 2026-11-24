@@ -3,6 +3,7 @@ import { Menu, Moon, Sun, X } from 'lucide-react';
 
 interface HeaderProps {
   hasExam: boolean;
+  isQuickRevision?: boolean;
   isGenerating: boolean;
   hasGraded: boolean;
   rankTitle: string;
@@ -14,6 +15,7 @@ interface HeaderProps {
 
 export function Header({
   hasExam,
+  isQuickRevision = false,
   isGenerating,
   hasGraded,
   rankTitle,
@@ -25,13 +27,19 @@ export function Header({
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const navItems = hasExam
-    ? [
-        { id: 'input-section', label: 'Source Notes' },
-        ...(hasGraded ? [{ id: 'score-summary', label: 'Score Summary' }] : []),
-        { id: 'section-a', label: 'Section A' },
-        { id: 'section-b', label: 'Section B' },
-        { id: 'section-c', label: 'Section C' },
-      ]
+    ? isQuickRevision
+      ? [
+          { id: 'upload-view', label: 'Upload Notes' },
+          { id: 'score-summary', label: 'Deck Overview' },
+          { id: 'quick-revision-deck', label: 'Cue Cards' },
+        ]
+      : [
+          { id: 'upload-view', label: 'Upload Notes' },
+          ...(hasGraded ? [{ id: 'score-summary', label: 'Score Summary' }] : []),
+          { id: 'section-a', label: 'Section A' },
+          { id: 'section-b', label: 'Section B' },
+          { id: 'section-c', label: 'Section C' },
+        ]
     : [
         { id: 'input-section', label: 'Material Input' },
         { id: 'how-it-works', label: 'Exam Format' },

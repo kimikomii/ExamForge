@@ -1,7 +1,6 @@
 export type ExamDifficulty =
-  | 'Standard Diploma Level'
-  | 'Hard / Tricky'
-  | 'Quick Revision';
+  | 'Standard Mock Exam'
+  | 'Quick Revision (15 Sticky-Note Cards)';
 
 export type SourceType = 'text' | 'pdf';
 
@@ -20,6 +19,7 @@ export interface MCQQuestion {
   correctIndex: number;
   explanation: string;
   concept: string;
+  hint?: string;
 }
 
 export interface FillInBlankQuestion {
@@ -27,6 +27,7 @@ export interface FillInBlankQuestion {
   sentence: string;
   answer: string;
   concept: string;
+  hint?: string;
 }
 
 export interface StructuredQuestion {
@@ -35,6 +36,7 @@ export interface StructuredQuestion {
   contextTag: string;
   maxMarks: number;
   concept: string;
+  hint?: string;
 }
 
 export interface MockExam {

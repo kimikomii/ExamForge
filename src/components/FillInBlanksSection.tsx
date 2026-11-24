@@ -10,6 +10,7 @@ interface FillInBlanksSectionProps {
   onPlaceChip: (questionId: string, chipId: string) => void;
   onRemoveChip: (questionId: string) => void;
   onCheckAnswers: () => void;
+  onFocusQuestion?: (questionId: string) => void;
 }
 
 interface WordChip {
@@ -25,6 +26,7 @@ export function FillInBlanksSection({
   onPlaceChip,
   onRemoveChip,
   onCheckAnswers,
+  onFocusQuestion,
 }: FillInBlanksSectionProps) {
   const [selectedChipId, setSelectedChipId] = useState<string | null>(null);
   const [dragOverQuestionId, setDragOverQuestionId] = useState<string | null>(null);
@@ -187,6 +189,9 @@ export function FillInBlanksSection({
           return (
             <article
               key={q.id}
+              data-exam-question-id={q.id}
+              onFocusCapture={() => onFocusQuestion?.(q.id)}
+              onPointerDown={() => onFocusQuestion?.(q.id)}
               className="rounded-2xl border border-[#D8CBB8] dark:border-[#4A3528] bg-[#FAF7F2] dark:bg-[#2B1E17] p-5 space-y-3"
             >
               <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-[#665042] dark:text-[#D4C3A3]">

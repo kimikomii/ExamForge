@@ -24,7 +24,9 @@ export function ExamSummaryBanner({
   statusMessage,
   onNewPracticeSet,
 }: ExamSummaryBannerProps) {
+  const isQuickRevision = exam.difficulty.toLowerCase().includes('quick revision');
   const mcqTotal = exam.mcqs.length;
+  const mcqPercent = mcqTotal > 0 ? Math.round((mcqCorrectCount / mcqTotal) * 100) : 0;
   const fillBlanksTotal = exam.fillInBlanks.length;
   const structuredTotal = exam.structured.reduce((sum, q) => sum + q.maxMarks, 0);
   const structuredEarned = grading
@@ -37,7 +39,9 @@ export function ExamSummaryBanner({
   const combinedPercent =
     combinedTotal > 0 ? Math.round((combinedEarned / combinedTotal) * 100) : 0;
 
-  const showScoreSummary = Boolean(grading) || fillBlanksChecked;
+  const showScoreSummary = isQuickRevision
+    ? mcqAnsweredCount === mcqTotal && mcqTotal > 0
+    : Boolean(grading) || fillBlanksChecked;
 
   return (
     <section
@@ -48,7 +52,7 @@ export function ExamSummaryBanner({
       <div className="flex flex-col md:flex-row md:items-start justify-between gap-5">
         <div className="space-y-1.5 max-w-2xl">
           <div className="flex flex-wrap items-center gap-2 text-xs text-[#665042] dark:text-[#D4C3A3]">
-            <span>Mock Examination</span>
+            <span>{isQuickRevision ? 'Quick Revision Deck' : 'Mock Examination'}</span>
             <span aria-hidden="true">·</span>
             <span>{exam.difficulty}</span>
           </div>
@@ -87,8 +91,53 @@ export function ExamSummaryBanner({
         </div>
       </div>
 
-      {/* Total Exam Score Summary */}
-      {showScoreSummary ? (
+      {/* Score Summary */}
+      {isQuickRevision ? (
+        showScoreSummary ? (
+          <div className="mt-6 pt-6 border-t border-[#D8CBB8] dark:border-[#4A3528]">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="rounded-xl border border-[#8B5A2B]/40 dark:border-[#C29B61]/60 bg-[#EFE8DC] dark:bg-[#38291E] p-4">
+                <p className="text-xs font-medium text-[#665042] dark:text-[#D4C3A3]">
+                  Quick Revision Score
+                </p>
+                <div className="mt-1.5 flex items-baseline gap-2.5">
+                  <span className="font-display text-2xl sm:text-3xl font-bold text-[#2C1E16] dark:text-[#E8DEC8] font-mono tabular-nums">
+                    {mcqCorrectCount}/{mcqTotal}
+                  </span>
+                  <span className="font-mono text-sm font-semibold text-[#5C4033] dark:text-[#C29B61] tabular-nums">
+                    {mcqPercent}%
+                  </span>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-[#D8CBB8] dark:border-[#4A3528] bg-[#F4EFE6] dark:bg-[#221812] p-4">
+                <p className="text-xs font-medium text-[#665042] dark:text-[#D4C3A3]">
+                  Deck Status
+                </p>
+                <div className="mt-1.5 flex items-baseline gap-2">
+                  <span className="font-display text-2xl font-bold text-[#2C1E16] dark:text-[#E8DEC8] font-mono tabular-nums">
+                    {mcqAnsweredCount}/{mcqTotal}
+                  </span>
+                  <span className="text-xs text-[#665042] dark:text-[#D4C3A3]">
+                    sticky-note cards completed
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="mt-5 pt-4 border-t border-[#D8CBB8] dark:border-[#4A3528] flex flex-wrap items-center gap-x-6 gap-y-2 text-xs text-[#665042] dark:text-[#D4C3A3]">
+            <span>
+              Cue Card Deck:{' '}
+              <strong className="font-mono tabular-nums text-[#2C1E16] dark:text-[#E8DEC8]">
+                {mcqAnsweredCount}/{mcqTotal}
+              </strong>{' '}
+              answered ({mcqCorrectCount} correct)
+            </span>
+            <span>Focus: Core definitions &amp; key facts</span>
+          </div>
+        )
+      ) : showScoreSummary ? (
         <div className="mt-6 pt-6 border-t border-[#D8CBB8] dark:border-[#4A3528] space-y-5">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="rounded-xl border border-[#8B5A2B]/40 dark:border-[#C29B61]/60 bg-[#EFE8DC] dark:bg-[#38291E] p-4">

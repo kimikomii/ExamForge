@@ -18,6 +18,7 @@ interface StructuredCardProps {
   isGrading: boolean;
   onAnswerChange: (value: string) => void;
   onRequestEli12: () => void;
+  onFocusQuestion?: () => void;
 }
 
 export function StructuredCard({
@@ -33,12 +34,18 @@ export function StructuredCard({
   isGrading,
   onAnswerChange,
   onRequestEli12,
+  onFocusQuestion,
 }: StructuredCardProps) {
   const isLowScore = grade !== undefined && grade.score < 4;
   const isPerfect = grade !== undefined && grade.score === grade.maxMarks;
 
   return (
-    <article className="rounded-2xl border border-[#D8CBB8] dark:border-[#4A3528] bg-[#FAF7F2] dark:bg-[#2B1E17] p-5 sm:p-6">
+    <article
+      data-exam-question-id={question.id}
+      onFocusCapture={onFocusQuestion}
+      onPointerDown={onFocusQuestion}
+      className="rounded-2xl border border-[#D8CBB8] dark:border-[#4A3528] bg-[#FAF7F2] dark:bg-[#2B1E17] p-5 sm:p-6"
+    >
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-[#665042] dark:text-[#D4C3A3]">
         <div className="flex items-center gap-2">
           <span className="font-mono tabular-nums font-medium text-[#5C4033] dark:text-[#C29B61]">

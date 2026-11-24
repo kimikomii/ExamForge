@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Minus, X } from 'lucide-react';
+import { Lightbulb, Minus, X } from 'lucide-react';
 
 export interface MascotReaction {
   id: number;
@@ -7,14 +7,21 @@ export interface MascotReaction {
   mood: 'neutral' | 'happy' | 'oops' | 'hype';
 }
 
-interface StudyMascotProps {
-  reaction: MascotReaction;
+export interface ZabellClue {
+  label: string;
+  text: string;
 }
 
-const EXTRA_QUIPS = [
-  'Hydration check: sip some water between sections!',
-  'Pro tip: read the stem twice before eyeing option A.',
-  'Active recall beats re-reading slides every single time.',
+interface StudyMascotProps {
+  reaction: MascotReaction;
+  hasActiveExam: boolean;
+  onRequestClue: () => ZabellClue | null;
+}
+
+const HOME_STUDY_TIPS = [
+  'Upload your lecture PDF or paste notes to start!',
+  'Try Quick Revision for 15 fast sticky-note cards!',
+  'Turn on Boss Battle (60s Speed Mode) to test your rapid recall!',
   'Wrong answers right now are future marks saved on exam day.',
 ];
 
@@ -53,15 +60,35 @@ function ScholarlyOwlIcon({ className = 'h-7 w-7' }: { className?: string }) {
   );
 }
 
-export function StudyMascot({ reaction }: StudyMascotProps) {
+export function StudyMascot({
+  reaction,
+  hasActiveExam,
+  onRequestClue,
+}: StudyMascotProps) {
   const [isMinimized, setIsMinimized] = useState(false);
   const [isBubbleDismissed, setIsBubbleDismissed] = useState(false);
-  const [localQuipIndex, setLocalQuipIndex] = useState<number | null>(null);
+  const [tipIndex, setTipIndex] = useState<number | null>(null);
+  const [activeClue, setActiveClue] = useState<ZabellClue | null>(null);
 
   useEffect(() => {
     setIsBubbleDismissed(false);
-    setLocalQuipIndex(null);
+    setTipIndex(null);
+    setActiveClue(null);
   }, [reaction.id]);
+
+  const handleMascotClick = () => {
+    setIsBubbleDismissed(false);
+    if (hasActiveExam) {
+      const clue = onRequestClue();
+      if (clue) {
+        setActiveClue(clue);
+        setTipIndex(null);
+        return;
+      }
+    }
+    setActiveClue(null);
+    setTipIndex((prev) => (prev === null ? 0 : (prev + 1) % HOME_STUDY_TIPS.length));
+  };
 
   if (isMinimized) {
     return (
@@ -72,26 +99,34 @@ export function StudyMascot({ reaction }: StudyMascotProps) {
             setIsMinimized(false);
             setIsBubbleDismissed(false);
           }}
-          aria-label="Show study mascot"
-          title="Show Professor Hoot"
+          aria-label="Show Zabell study mascot"
+          title="Need a hint? Click Zabell!"
           className="inline-flex items-center gap-2 rounded-full border border-[#D8CBB8] dark:border-[#4A3528] bg-[#FAF7F2] dark:bg-[#2B1E17] px-3 py-2 text-xs font-medium text-[#5C4033] dark:text-[#E8DEC8] shadow-md hover:border-[#8B5A2B] dark:hover:border-[#C29B61] transition-colors min-h-[40px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8B5A2B] dark:focus-visible:ring-[#C29B61]"
         >
           <ScholarlyOwlIcon className="h-5 w-5" />
-          <span>Owl Buddy</span>
+          <span>Zabell 🦉</span>
         </button>
       </div>
     );
   }
 
-  const displayText =
-    localQuipIndex !== null ? EXTRA_QUIPS[localQuipIndex] : reaction.text;
+  const displayText = activeClue
+    ? activeClue.text
+    : tipIndex !== null
+      ? HOME_STUDY_TIPS[tipIndex]
+      : reaction.text;
 
-  const bubbleAccent =
-    reaction.mood === 'hype'
+  const bubbleAccent = activeClue
+    ? 'border-[#CFA364] dark:border-[#C29B61]'
+    : reaction.mood === 'hype' && tipIndex === null
       ? 'border-[#749B78] dark:border-[#4F7D56]'
-      : reaction.mood === 'oops'
+      : reaction.mood === 'oops' && tipIndex === null
         ? 'border-[#C57463] dark:border-[#A85B4C]'
         : 'border-[#D8CBB8] dark:border-[#4A3528]';
+
+  const tooltipLabel = hasActiveExam
+    ? 'Need a hint? Click Zabell!'
+    : 'Need a study tip? Click Zabell!';
 
   return (
     <div
@@ -100,18 +135,18 @@ export function StudyMascot({ reaction }: StudyMascotProps) {
     >
       {!isBubbleDismissed && (
         <div
-          className={`w-[260px] rounded-2xl border ${bubbleAccent} bg-[#FAF7F2] dark:bg-[#2B1E17] p-3.5 shadow-lg text-[#2C1E16] dark:text-[#E8DEC8]`}
+          className={`w-[275px] rounded-2xl border ${bubbleAccent} bg-[#FAF7F2] dark:bg-[#2B1E17] p-3.5 shadow-lg text-[#2C1E16] dark:text-[#E8DEC8]`}
         >
           <div className="flex items-center justify-between gap-2 mb-1">
             <span className="text-[11px] font-semibold text-[#8B5A2B] dark:text-[#C29B61]">
-              Professor Hoot
+              Zabell 🦉
             </span>
             <div className="flex items-center gap-1">
               <button
                 type="button"
                 onClick={() => setIsMinimized(true)}
-                aria-label="Hide study mascot"
-                title="Minimize mascot"
+                aria-label="Hide Zabell"
+                title="Minimize Zabell"
                 className="inline-flex h-6 w-6 items-center justify-center rounded-md text-[#665042] dark:text-[#D4C3A3] hover:bg-[#EFE8DC] dark:hover:bg-[#38291E] hover:text-[#2C1E16] dark:hover:text-[#E8DEC8] transition-colors"
               >
                 <Minus className="h-3.5 w-3.5" />
@@ -127,8 +162,20 @@ export function StudyMascot({ reaction }: StudyMascotProps) {
               </button>
             </div>
           </div>
+
+          {activeClue && (
+            <div className="mb-1.5 inline-flex items-center gap-1 text-[11px] font-semibold text-[#6E4614] dark:text-[#C29B61]">
+              <Lightbulb className="h-3.5 w-3.5 shrink-0" />
+              <span>{activeClue.label}</span>
+            </div>
+          )}
+
           <p className="text-xs leading-relaxed text-[#2C1E16] dark:text-[#E8DEC8]">
             {displayText}
+          </p>
+
+          <p className="mt-2 text-[10px] text-[#7B6859] dark:text-[#9E8B6E]">
+            {hasActiveExam ? 'Need a hint? Click Zabell!' : 'Click Zabell for more study tips'}
           </p>
         </div>
       )}
@@ -138,8 +185,8 @@ export function StudyMascot({ reaction }: StudyMascotProps) {
           <button
             type="button"
             onClick={() => setIsMinimized(true)}
-            aria-label="Hide study mascot"
-            title="Minimize mascot"
+            aria-label="Hide Zabell"
+            title="Minimize Zabell"
             className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#D8CBB8] dark:border-[#4A3528] bg-[#FAF7F2] dark:bg-[#2B1E17] text-[#665042] dark:text-[#D4C3A3] shadow-sm hover:text-[#2C1E16] dark:hover:text-[#E8DEC8] transition-colors"
           >
             <Minus className="h-3.5 w-3.5" />
@@ -148,17 +195,9 @@ export function StudyMascot({ reaction }: StudyMascotProps) {
 
         <button
           type="button"
-          onClick={() => {
-            if (isBubbleDismissed) {
-              setIsBubbleDismissed(false);
-            } else {
-              setLocalQuipIndex((prev) =>
-                prev === null ? 0 : (prev + 1) % EXTRA_QUIPS.length
-              );
-            }
-          }}
-          aria-label="Professor Hoot study mascot — click for a study tip"
-          title="Click for a study tip"
+          onClick={handleMascotClick}
+          aria-label={`Zabell study mascot — ${tooltipLabel}`}
+          title={tooltipLabel}
           className="animate-mascot-bob inline-flex h-12 w-12 items-center justify-center rounded-full border border-[#D8CBB8] dark:border-[#4A3528] bg-[#FAF7F2] dark:bg-[#2B1E17] shadow-lg hover:border-[#8B5A2B] dark:hover:border-[#C29B61] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8B5A2B] dark:focus-visible:ring-[#C29B61]"
         >
           <ScholarlyOwlIcon className="h-8 w-8" />

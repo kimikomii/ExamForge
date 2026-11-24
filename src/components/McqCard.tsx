@@ -12,6 +12,7 @@ interface McqCardProps {
   eli12Error: string | undefined;
   onSelectOption: (optionIndex: number) => void;
   onRequestEli12: () => void;
+  onFocusQuestion?: () => void;
 }
 
 const OPTION_LETTERS = ['A', 'B', 'C', 'D'];
@@ -27,13 +28,19 @@ export function McqCard({
   eli12Error,
   onSelectOption,
   onRequestEli12,
+  onFocusQuestion,
 }: McqCardProps) {
   const isAnswered = selectedOptionIndex !== undefined;
   const isCorrect = isAnswered && selectedOptionIndex === question.correctIndex;
   const isWrong = isAnswered && selectedOptionIndex !== question.correctIndex;
 
   return (
-    <article className="rounded-2xl border border-[#D8CBB8] dark:border-[#4A3528] bg-[#FAF7F2] dark:bg-[#2B1E17] p-5 sm:p-6">
+    <article
+      data-exam-question-id={question.id}
+      onFocusCapture={onFocusQuestion}
+      onPointerDown={onFocusQuestion}
+      className="rounded-2xl border border-[#D8CBB8] dark:border-[#4A3528] bg-[#FAF7F2] dark:bg-[#2B1E17] p-5 sm:p-6"
+    >
       {/* Unboxed quiet metadata header */}
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-[#665042] dark:text-[#D4C3A3]">
         <div className="flex items-center gap-2">

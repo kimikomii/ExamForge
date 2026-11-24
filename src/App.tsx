@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import { CheckCheck, Loader2 } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ArrowLeft, ArrowRight, CheckCheck, Loader2 } from 'lucide-react';
 import { Header } from './components/Header';
 import { StudyInputSection } from './components/StudyInputSection';
 import { ExamSummaryBanner } from './components/ExamSummaryBanner';
@@ -12,7 +12,8 @@ import {
   ScoreFeedbackModalData,
 } from './components/ScoreCelebrationModal';
 import { BossBattleBar } from './components/BossBattleBar';
-import { MascotReaction, StudyMascot } from './components/StudyMascot';
+import { MascotReaction, StudyMascot, ZabellClue } from './components/StudyMascot';
+import { StickyNoteCueCards } from './components/StickyNoteCueCards';
 import { postExamWithProgress } from './lib/api';
 import {
   Eli12Explanation,
@@ -55,9 +56,10 @@ export default function App() {
     type: 'text',
     notesText: '',
   });
-  const [difficulty, setDifficulty] = useState<ExamDifficulty>('Standard Diploma Level');
+  const [difficulty, setDifficulty] = useState<ExamDifficulty>('Standard Mock Exam');
   const [exam, setExam] = useState<MockExam | null>(null);
-  const [isInputCollapsed, setIsInputCollapsed] = useState(false);
+  const [activeSection, setActiveSection] = useState<'A' | 'B' | 'C'>('A');
+  const [mcqPage, setMcqPage] = useState(1);
 
   const [isGenerating, setIsGenerating] = useState(false);
   const [generateStatus, setGenerateStatus] = useState<string | null>(null);
@@ -120,11 +122,18 @@ export default function App() {
 
   const [mascotReaction, setMascotReaction] = useState<MascotReaction>({
     id: 0,
-    text: "Hoo's ready to study? Paste notes or drop a PDF to begin!",
+    text: 'Need a hint? Click Zabell! Drop a PDF or paste notes to start.',
     mood: 'neutral',
   });
 
   const examTopRef = useRef<HTMLDivElement>(null);
+  const focusedQuestionIdRef = useRef<string | null>(null);
+  const activeQuickCardRef = useRef<{ id: string; cardNumber: number } | null>(null);
+
+  const handleActiveQuickCardChange = useCallback((id: string, cardNumber: number) => {
+    activeQuickCardRef.current = { id, cardNumber };
+    focusedQuestionIdRef.current = id;
+  }, []);
 
   const pushMascot = (text: string, mood: MascotReaction['mood']) => {
     setMascotReaction((prev) => ({ id: prev.id + 1, text, mood }));
@@ -137,13 +146,46 @@ export default function App() {
     }
   };
 
+  const handleReturnToUpload = useCallback(() => {
+    setExam(null);
+    setBossRunning(false);
+    setBossFinished(false);
+    setScoreModal(null);
+    setGenerateError(null);
+    focusedQuestionIdRef.current = null;
+    activeQuickCardRef.current = null;
+    pushMascot('Need a hint? Click Zabell! Drop a PDF or paste notes to start.', 'neutral');
+    window.scrollTo(0, 0);
+  }, []);
+
+  const switchSection = (nextSection: 'A' | 'B' | 'C') => {
+    setActiveSection(nextSection);
+    focusedQuestionIdRef.current = null;
+    requestAnimationFrame(() => {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+  };
+
   const scrollToSection = (sectionId: string) => {
     if (sectionId === 'top') {
       window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
-    if (sectionId === 'input-section' && isInputCollapsed) {
-      setIsInputCollapsed(false);
+    if (sectionId === 'upload-view') {
+      handleReturnToUpload();
+      return;
+    }
+    if (sectionId === 'section-a') {
+      switchSection('A');
+      return;
+    }
+    if (sectionId === 'section-b') {
+      switchSection('B');
+      return;
+    }
+    if (sectionId === 'section-c') {
+      switchSection('C');
+      return;
     }
     requestAnimationFrame(() => {
       const el = document.getElementById(sectionId);
@@ -181,6 +223,8 @@ export default function App() {
       );
 
       setExam(data);
+      setActiveSection('A');
+      setMcqPage(1);
       setMcqAnswers({});
       setShowOnlyWrongMcqs(false);
       setFillBlankPlacements({});
@@ -194,8 +238,10 @@ export default function App() {
       setEli12Errors({});
       setComboStreak(0);
       setScoreModal(null);
-      setIsInputCollapsed(true);
+      focusedQuestionIdRef.current = null;
+      activeQuickCardRef.current = null;
 
+      const isQuickMode = data.difficulty.toLowerCase().includes('quick revision');
       if (bossBattleEnabled) {
         setBossTimeLeft(60);
         setBossFinished(false);
@@ -210,14 +256,16 @@ export default function App() {
         setBossFinished(false);
         setBossTimeLeft(60);
         pushMascot(
-          "Mock exam ready! Let's build a streak in Section A.",
+          isQuickMode
+            ? '15 sticky-note cue cards ready! Flip through and lock in every key fact.'
+            : "Mock exam ready! Let's build a streak in Section A.",
           'neutral'
         );
       }
 
-      setTimeout(() => {
-        examTopRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }, 60);
+      requestAnimationFrame(() => {
+        window.scrollTo(0, 0);
+      });
     } catch (err) {
       setGenerateError(
         err instanceof Error ? err.message : 'Unable to generate mock exam. Please try again.'
@@ -233,7 +281,6 @@ export default function App() {
       generateExam(true);
     } else {
       setSource({ type: 'text', notesText: SAMPLE_LECTURE_NOTES });
-      setIsInputCollapsed(false);
       setGenerateError(null);
       scrollToSection('input-section');
     }
@@ -287,19 +334,7 @@ export default function App() {
       const sectionTotal = exam.mcqs.length;
       const sectionPercent =
         sectionTotal > 0 ? Math.round((sectionCorrect / sectionTotal) * 100) : 0;
-
-      const fillTotal = exam.fillInBlanks?.length ?? 0;
-      const structuredTotal = exam.structured.reduce((sum, q) => sum + q.maxMarks, 0);
-      const structuredEarned = grading
-        ? grading.results.reduce((sum, r) => sum + r.score, 0)
-        : 0;
-      const overallTotal = sectionTotal + fillTotal + structuredTotal;
-      const overallEarned =
-        sectionCorrect + (fillBlanksChecked ? fillBlanksScore : 0) + structuredEarned;
-      const overallPercent =
-        overallTotal > 0 ? Math.round((overallEarned / overallTotal) * 100) : 0;
-
-      const allSectionsDone = fillBlanksChecked && Boolean(grading);
+      const isQuickMode = exam.difficulty.toLowerCase().includes('quick revision');
 
       if (bossBattleEnabled && bossRunning) {
         setBossRunning(false);
@@ -314,6 +349,43 @@ export default function App() {
           }
         }
       }
+
+      if (isQuickMode) {
+        const isAce = sectionPercent >= 80;
+        if (isAce) {
+          pushMascot(
+            `${sectionCorrect}/${sectionTotal} (${sectionPercent}%)! You crushed all 15 cue cards!`,
+            'hype'
+          );
+        } else {
+          pushMascot(
+            `Deck complete (${sectionCorrect}/${sectionTotal})! Review the sticky notes you missed.`,
+            'neutral'
+          );
+        }
+        triggerScoreFeedback({
+          sectionLabel: 'Quick Revision · 15 Cue Cards',
+          percentage: sectionPercent,
+          earned: sectionCorrect,
+          total: sectionTotal,
+          unitLabel: 'cards correct',
+          isAce,
+        });
+        return;
+      }
+
+      const fillTotal = exam.fillInBlanks?.length ?? 0;
+      const structuredTotal = exam.structured.reduce((sum, q) => sum + q.maxMarks, 0);
+      const structuredEarned = grading
+        ? grading.results.reduce((sum, r) => sum + r.score, 0)
+        : 0;
+      const overallTotal = sectionTotal + fillTotal + structuredTotal;
+      const overallEarned =
+        sectionCorrect + (fillBlanksChecked ? fillBlanksScore : 0) + structuredEarned;
+      const overallPercent =
+        overallTotal > 0 ? Math.round((overallEarned / overallTotal) * 100) : 0;
+
+      const allSectionsDone = fillBlanksChecked && Boolean(grading);
 
       if (allSectionsDone && overallPercent >= 80 && sectionPercent < 80) {
         pushMascot(
@@ -516,6 +588,14 @@ export default function App() {
     ({ q }) => mcqAnswers[q.id] !== undefined && mcqAnswers[q.id] !== q.correctIndex
   );
   const visibleMcqEntries = showOnlyWrongMcqs ? wrongMcqEntries : mcqEntries;
+
+  const MCQS_PER_PAGE = 5;
+  const totalMcqPages = Math.max(1, Math.ceil(visibleMcqEntries.length / MCQS_PER_PAGE));
+  const safeMcqPage = Math.min(mcqPage, totalMcqPages);
+  const pagedMcqEntries = visibleMcqEntries.slice(
+    (safeMcqPage - 1) * MCQS_PER_PAGE,
+    safeMcqPage * MCQS_PER_PAGE
+  );
 
   const fillBlanksScore =
     exam && fillBlanksChecked
@@ -736,12 +816,114 @@ export default function App() {
           ? 'Lecture Survivor 📚'
           : 'Cramming Rookie ☕';
 
+  const isQuickRevisionExam = Boolean(
+    exam?.difficulty.toLowerCase().includes('quick revision')
+  );
+
+  const getActiveZabellClue = useCallback((): ZabellClue | null => {
+    if (!exam) return null;
+
+    const buildClueById = (questionId: string): ZabellClue | null => {
+      const mcqIndex = exam.mcqs.findIndex((q) => q.id === questionId);
+      if (mcqIndex !== -1) {
+        const q = exam.mcqs[mcqIndex];
+        return {
+          label: isQuickRevisionExam
+            ? `Clue · Card ${mcqIndex + 1} of ${exam.mcqs.length}`
+            : `Clue · Section A Q${mcqIndex + 1}`,
+          text:
+            q.hint && q.hint.length > 0
+              ? q.hint
+              : `Focus on how ${q.concept} works in your lecture notes and rule out options that contradict it.`,
+        };
+      }
+
+      const fibIndex = (exam.fillInBlanks ?? []).findIndex((q) => q.id === questionId);
+      if (fibIndex !== -1) {
+        const q = exam.fillInBlanks[fibIndex];
+        return {
+          label: `Clue · Section B Blank ${fibIndex + 1}`,
+          text:
+            q.hint && q.hint.length > 0
+              ? q.hint
+              : `Look at the Word Bank terms tied to ${q.concept} and check which fits the sentence context.`,
+        };
+      }
+
+      const strIndex = exam.structured.findIndex((q) => q.id === questionId);
+      if (strIndex !== -1) {
+        const q = exam.structured[strIndex];
+        return {
+          label: `Clue · Section C Q${strIndex + 1}`,
+          text:
+            q.hint && q.hint.length > 0
+              ? q.hint
+              : `Anchor your response with the core definition and mechanism behind ${q.concept}.`,
+        };
+      }
+
+      return null;
+    };
+
+    if (isQuickRevisionExam) {
+      const targetId = activeQuickCardRef.current?.id ?? exam.mcqs[0]?.id;
+      return targetId ? buildClueById(targetId) : null;
+    }
+
+    if (typeof document !== 'undefined' && typeof window !== 'undefined') {
+      const cards = Array.from(
+        document.querySelectorAll<HTMLElement>('[data-exam-question-id]')
+      );
+      const isVisible = (el: HTMLElement) => {
+        const rect = el.getBoundingClientRect();
+        return rect.bottom > 80 && rect.top < window.innerHeight - 40;
+      };
+
+      if (focusedQuestionIdRef.current) {
+        const focusedEl = cards.find(
+          (el) => el.dataset.examQuestionId === focusedQuestionIdRef.current
+        );
+        if (focusedEl && isVisible(focusedEl)) {
+          const clue = buildClueById(focusedQuestionIdRef.current);
+          if (clue) return clue;
+        }
+      }
+
+      const idealY = window.innerHeight * 0.35;
+      let bestId: string | null = null;
+      let bestDistance = Number.POSITIVE_INFINITY;
+      for (const el of cards) {
+        if (!isVisible(el)) continue;
+        const rect = el.getBoundingClientRect();
+        const centerY = rect.top + Math.min(rect.height, 260) / 2;
+        const dist = Math.abs(centerY - idealY);
+        if (dist < bestDistance && el.dataset.examQuestionId) {
+          bestDistance = dist;
+          bestId = el.dataset.examQuestionId;
+        }
+      }
+      if (bestId) {
+        const clue = buildClueById(bestId);
+        if (clue) return clue;
+      }
+    }
+
+    const fallbackId =
+      activeSection === 'B'
+        ? exam.fillInBlanks?.[0]?.id
+        : activeSection === 'C'
+          ? exam.structured[0]?.id
+          : pagedMcqEntries[0]?.q.id ?? exam.mcqs[0]?.id;
+    return fallbackId ? buildClueById(fallbackId) : null;
+  }, [exam, isQuickRevisionExam, activeSection, pagedMcqEntries]);
+
   return (
     <div id="top" className="min-h-screen flex flex-col bg-[#F4EFE6] text-[#2C1E16] dark:bg-[#1E1510] dark:text-[#E8DEC8] transition-colors duration-150">
       <Header
         hasExam={Boolean(exam)}
+        isQuickRevision={isQuickRevisionExam}
         isGenerating={isGenerating}
-        hasGraded={Boolean(grading) || fillBlanksChecked}
+        hasGraded={Boolean(grading) || fillBlanksChecked || (isQuickRevisionExam && mcqAnsweredCount === (exam?.mcqs.length ?? 0))}
         rankTitle={studentRankTitle}
         theme={theme}
         onToggleTheme={() => setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'))}
@@ -749,44 +931,60 @@ export default function App() {
         onPrimaryAction={handleHeaderPrimaryAction}
       />
 
-      <main className="flex-1 mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8 py-8 sm:py-12 space-y-10">
-        {/* Clean Editorial Intro when no exam is generated */}
-        {!exam && (
-          <section className="max-w-3xl space-y-3">
-            <p className="text-xs font-medium text-[#8B5A2B] dark:text-[#C29B61] tracking-wide">
-              Active Recall &amp; Lecturer Feedback
-            </p>
-            <h1 className="font-display text-3xl sm:text-4xl font-bold tracking-tight text-[#5C4033] dark:text-[#E8DEC8] [text-wrap:balance]">
-              Turn lecture slides and notes into timed-grade mock exams
-            </h1>
-            <p className="text-base leading-relaxed text-[#665042] dark:text-[#D4C3A3] max-w-2xl">
-              Test your retention with instant multiple-choice diagnostics, write structured
-              exam answers, and receive line-by-line grading with missing key terms and
-              everyday analogies.
-            </p>
-          </section>
-        )}
+      <main className="flex-1 mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8 py-6 sm:py-10">
+        {!exam ? (
+          /* VIEW 1: Home / Notes Upload View */
+          <div className="space-y-10">
+            <section className="max-w-3xl space-y-3">
+              <p className="text-xs font-medium text-[#8B5A2B] dark:text-[#C29B61] tracking-wide">
+                Active Recall &amp; Lecturer Feedback
+              </p>
+              <h1 className="font-display text-3xl sm:text-4xl font-bold tracking-tight text-[#5C4033] dark:text-[#E8DEC8] [text-wrap:balance]">
+                Turn messy notes into exam-ready confidence in seconds. 🚀
+              </h1>
+              <p className="text-base leading-relaxed text-[#665042] dark:text-[#D4C3A3] max-w-2xl">
+                Drop in your lecture slides and get an instant practice test—complete with quick quizzes,
+                fill-in-the-blanks, and an AI tutor that explains every mistake.
+              </p>
+            </section>
 
-        {/* 1. Input Section */}
-        <StudyInputSection
-          source={source}
-          difficulty={difficulty}
-          bossBattleEnabled={bossBattleEnabled}
-          isGenerating={isGenerating}
-          statusMessage={generateStatus}
-          error={generateError}
-          hasExam={Boolean(exam)}
-          isCollapsed={isInputCollapsed}
-          onToggleCollapse={() => setIsInputCollapsed((prev) => !prev)}
-          onSourceChange={setSource}
-          onDifficultyChange={setDifficulty}
-          onToggleBossBattle={handleToggleBossBattle}
-          onGenerate={() => generateExam(false)}
-        />
+            <StudyInputSection
+              source={source}
+              difficulty={difficulty}
+              bossBattleEnabled={bossBattleEnabled}
+              isGenerating={isGenerating}
+              statusMessage={generateStatus}
+              error={generateError}
+              hasExam={false}
+              isCollapsed={false}
+              onToggleCollapse={() => {}}
+              onSourceChange={setSource}
+              onDifficultyChange={setDifficulty}
+              onToggleBossBattle={handleToggleBossBattle}
+              onGenerate={() => generateExam(false)}
+            />
+          </div>
+        ) : (
+          /* VIEW 2: Active Exam / Quiz Workspace */
+          <div ref={examTopRef} className="space-y-7 scroll-mt-24">
+            {/* Workspace Top Navigation Bar */}
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={handleReturnToUpload}
+                className="inline-flex items-center gap-2 rounded-xl border border-[#D8CBB8] dark:border-[#4A3528] bg-[#FAF7F2] dark:bg-[#2B1E17] px-4 py-2 text-xs sm:text-sm font-semibold text-[#5C4033] dark:text-[#E8DEC8] hover:bg-[#EFE8DC] dark:hover:bg-[#38291E] hover:border-[#8B5A2B] dark:hover:border-[#C29B61] transition-colors min-h-[42px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8B5A2B] dark:focus-visible:ring-[#C29B61]"
+              >
+                <ArrowLeft className="h-4 w-4 shrink-0" />
+                <span>Upload New Notes</span>
+              </button>
 
-        {/* 2. Mock Exam Interface */}
-        {exam && (
-          <div ref={examTopRef} className="space-y-10 scroll-mt-24">
+              <span className="text-xs font-medium text-[#665042] dark:text-[#D4C3A3]">
+                {source.type === 'pdf'
+                  ? `Source: ${source.pdfName ?? 'Uploaded PDF'}`
+                  : 'Source: Pasted Lecture Notes'}
+              </span>
+            </div>
+
             <ExamSummaryBanner
               exam={exam}
               mcqAnsweredCount={mcqAnsweredCount}
@@ -799,240 +997,471 @@ export default function App() {
               onNewPracticeSet={() => generateExam(true)}
             />
 
-            {/* Section A: Multiple Choice (20 Questions) */}
-            <section id="section-a" aria-labelledby="section-a-heading" className="space-y-5 scroll-mt-24">
-              <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3 pb-4 border-b border-[#D8CBB8] dark:border-[#4A3528]">
-                <div>
-                  <h2
-                    id="section-a-heading"
-                    className="font-display text-xl sm:text-2xl font-semibold text-[#5C4033] dark:text-[#E8DEC8]"
-                  >
-                    Section A · Multiple Choice
-                  </h2>
-                  <p className="mt-1 text-sm text-[#665042] dark:text-[#D4C3A3]">
-                    Click an option to reveal instant feedback and explanations.
-                  </p>
-                </div>
+            {isQuickRevisionExam ? (
+              <>
+                {bossBattleEnabled && (
+                  <BossBattleBar
+                    timeLeft={bossTimeLeft}
+                    isRunning={bossRunning}
+                    hasFinished={bossFinished}
+                    correctCount={mcqCorrectCount}
+                    answeredCount={mcqAnsweredCount}
+                    totalQuestions={exam.mcqs.length}
+                    personalBest={bossPersonalBest}
+                    isNewRecord={bossIsNewRecord}
+                    onStartOrRestart={handleStartOrRestartBossBattle}
+                  />
+                )}
 
-                {/* Live MCQ Score Counter + Combo Streak */}
-                <div
-                  aria-live="polite"
-                  className="inline-flex flex-wrap items-center gap-3 rounded-xl border border-[#D8CBB8] dark:border-[#4A3528] bg-[#FAF7F2] dark:bg-[#2B1E17] px-4 py-2.5 text-xs sm:text-sm font-mono tabular-nums self-start sm:self-auto shrink-0"
-                >
-                  <span className="font-semibold text-[#5C4033] dark:text-[#C29B61]">
-                    Score: {mcqCorrectCount} / {exam.mcqs.length}
-                  </span>
-                  <span aria-hidden="true" className="text-[#BFA98E] dark:text-[#6B503E]">·</span>
-                  <span className="text-[#2C1E16] dark:text-[#E8DEC8]">
-                    {mcqAnsweredCount} / {exam.mcqs.length} Answered
-                  </span>
-                  {(comboStreak > 0 || mcqAnsweredCount > 0) && (
-                    <>
-                      <span aria-hidden="true" className="text-[#BFA98E] dark:text-[#6B503E]">·</span>
-                      <span
-                        className={
-                          comboStreak >= 1
-                            ? 'font-semibold text-[#8B5A2B] dark:text-[#C29B61]'
-                            : 'text-[#665042] dark:text-[#D4C3A3]'
-                        }
-                      >
-                        {comboStreak}x Streak {comboStreak >= 1 ? '🔥' : ''}
-                      </span>
-                    </>
-                  )}
-                </div>
-              </div>
-
-              {bossBattleEnabled && (
-                <BossBattleBar
-                  timeLeft={bossTimeLeft}
-                  isRunning={bossRunning}
-                  hasFinished={bossFinished}
-                  correctCount={mcqCorrectCount}
-                  answeredCount={mcqAnsweredCount}
-                  totalQuestions={exam.mcqs.length}
-                  personalBest={bossPersonalBest}
-                  isNewRecord={bossIsNewRecord}
-                  onStartOrRestart={handleStartOrRestartBossBattle}
+                <StickyNoteCueCards
+                  key={`${exam.topicTitle}-${exam.mcqs[0]?.question ?? 'deck'}`}
+                  questions={exam.mcqs}
+                  answers={mcqAnswers}
+                  comboStreak={comboStreak}
+                  eli12Map={eli12Map}
+                  eli12Loading={eli12Loading}
+                  eli12Status={eli12Status}
+                  eli12Errors={eli12Errors}
+                  onSelectOption={handleSelectMcqOption}
+                  onRequestEli12={(mcq) =>
+                    handleRequestEli12({
+                      id: mcq.id,
+                      question: mcq.question,
+                      concept: mcq.concept,
+                      correctOrModelAnswer: `${mcq.options[mcq.correctIndex]} — ${mcq.explanation}`,
+                      studentAttempt:
+                        mcqAnswers[mcq.id] !== undefined
+                          ? mcq.options[mcqAnswers[mcq.id]]
+                          : undefined,
+                    })
+                  }
+                  onActiveQuestionChange={handleActiveQuickCardChange}
+                  onOpenFinalResults={() => {
+                    const total = exam.mcqs.length;
+                    const pct = total > 0 ? Math.round((mcqCorrectCount / total) * 100) : 0;
+                    triggerScoreFeedback({
+                      sectionLabel: 'Quick Revision · 15 Cue Cards',
+                      percentage: pct,
+                      earned: mcqCorrectCount,
+                      total,
+                      unitLabel: 'cards correct',
+                      isAce: pct >= 80,
+                    });
+                  }}
                 />
-              )}
-
-              {visibleMcqEntries.length > 0 ? (
-                <div className="space-y-4">
-                  {visibleMcqEntries.map(({ q: mcq, idx }) => (
-                    <McqCard
-                      key={mcq.id}
-                      question={mcq}
-                      index={idx}
-                      total={exam.mcqs.length}
-                      selectedOptionIndex={mcqAnswers[mcq.id]}
-                      eli12={eli12Map[mcq.id]}
-                      isLoadingEli12={Boolean(eli12Loading[mcq.id])}
-                      eli12Status={eli12Status[mcq.id]}
-                      eli12Error={eli12Errors[mcq.id]}
-                      onSelectOption={(optIdx) => handleSelectMcqOption(mcq.id, optIdx)}
-                      onRequestEli12={() =>
-                        handleRequestEli12({
-                          id: mcq.id,
-                          question: mcq.question,
-                          concept: mcq.concept,
-                          correctOrModelAnswer: `${mcq.options[mcq.correctIndex]} — ${mcq.explanation}`,
-                          studentAttempt:
-                            mcqAnswers[mcq.id] !== undefined
-                              ? mcq.options[mcqAnswers[mcq.id]]
-                              : undefined,
-                        })
-                      }
-                    />
-                  ))}
-                </div>
-              ) : (
-                <div className="rounded-2xl border border-[#D8CBB8] dark:border-[#4A3528] bg-[#FAF7F2] dark:bg-[#2B1E17] p-6 text-center space-y-2">
-                  <p className="text-sm font-medium text-[#2C1E16] dark:text-[#E8DEC8]">
-                    No wrong answers to review yet.
-                  </p>
-                  <p className="text-xs text-[#665042] dark:text-[#D4C3A3]">
-                    {mcqAnsweredCount === 0
-                      ? 'Answer questions above, then toggle this filter to review missed concepts.'
-                      : `You have answered ${mcqAnsweredCount} question${mcqAnsweredCount === 1 ? '' : 's'} with zero mistakes so far.`}
-                  </p>
-                </div>
-              )}
-
-              {/* Bottom Wrong Answers Filter Toggle */}
-              <div className="rounded-xl border border-[#D8CBB8] dark:border-[#4A3528] bg-[#FAF7F2] dark:bg-[#2B1E17] px-4 py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div className="text-xs sm:text-sm text-[#665042] dark:text-[#D4C3A3]">
-                  <span className="font-medium text-[#5C4033] dark:text-[#E8DEC8]">Review Mode</span>
-                  <span aria-hidden="true"> · </span>
-                  <span className="font-mono tabular-nums">
-                    {wrongMcqEntries.length} wrong {wrongMcqEntries.length === 1 ? 'answer' : 'answers'} so far
-                  </span>
-                </div>
-
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={showOnlyWrongMcqs}
-                  onClick={() => setShowOnlyWrongMcqs((prev) => !prev)}
-                  className={`inline-flex items-center justify-center gap-2.5 rounded-lg border px-4 py-2 text-xs sm:text-sm font-medium transition-colors whitespace-nowrap shrink-0 min-h-[42px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8B5A2B] dark:focus-visible:ring-[#C29B61] ${
-                    showOnlyWrongMcqs
-                      ? 'border-[#C57463] dark:border-[#A85B4C] bg-[#F9EBE7] dark:bg-[#3A221D] text-[#7A2E20] dark:text-[#F4DFDA] hover:bg-[#F3D8D1] dark:hover:bg-[#4B2C25]'
-                      : 'border-[#D8CBB8] dark:border-[#4A3528] bg-[#F4EFE6] dark:bg-[#1E1510] text-[#2C1E16] dark:text-[#E8DEC8] hover:bg-[#EFE8DC] dark:hover:bg-[#38291E]'
-                  }`}
+              </>
+            ) : (
+              <>
+                {/* Section Navigation Tabs (One Section Shown at a Time) */}
+                <div
+                  role="tablist"
+                  aria-label="Exam sections"
+                  className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 rounded-2xl border border-[#D8CBB8] dark:border-[#4A3528] bg-[#FAF7F2] dark:bg-[#2B1E17] p-2"
                 >
-                  <span>{showOnlyWrongMcqs ? 'Showing Only Wrong Answers' : 'Show Only Wrong Answers'}</span>
-                  <span className="font-mono tabular-nums text-xs opacity-80">
-                    ({wrongMcqEntries.length})
-                  </span>
-                </button>
-              </div>
-            </section>
-
-            {/* Section B: 10 Fill-in-the-Blanks with Word Bank */}
-            <FillInBlanksSection
-              questions={exam.fillInBlanks ?? []}
-              wordBank={exam.wordBank ?? []}
-              placements={fillBlankPlacements}
-              isChecked={fillBlanksChecked}
-              onPlaceChip={handlePlaceFillBlankChip}
-              onRemoveChip={handleRemoveFillBlankChip}
-              onCheckAnswers={handleCheckFillBlanks}
-            />
-
-            {/* Section C: Structured / Short-Answer (3 Questions) */}
-            <section id="section-c" aria-labelledby="section-c-heading" className="space-y-5 scroll-mt-24">
-              <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-2 pb-3 border-b border-[#D8CBB8] dark:border-[#4A3528]">
-                <div>
-                  <h2
-                    id="section-c-heading"
-                    className="font-display text-xl sm:text-2xl font-semibold text-[#5C4033] dark:text-[#E8DEC8]"
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={activeSection === 'A'}
+                    onClick={() => switchSection('A')}
+                    className={`flex items-center justify-between gap-2 rounded-xl px-4 py-3 text-left text-xs sm:text-sm font-semibold transition-colors min-h-[46px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8B5A2B] dark:focus-visible:ring-[#C29B61] ${
+                      activeSection === 'A'
+                        ? 'bg-[#5C4033] dark:bg-[#C29B61] text-white dark:text-[#1E1510] shadow-sm'
+                        : 'text-[#5C4033] dark:text-[#E8DEC8] hover:bg-[#EFE8DC] dark:hover:bg-[#38291E]'
+                    }`}
                   >
-                    Section C · Structured Short Answer
-                  </h2>
-                  <p className="mt-1 text-sm text-[#665042] dark:text-[#D4C3A3]">
-                    Type your responses below, then submit to the AI Lecturer for 5-mark rubric grading.
-                  </p>
-                </div>
-                <p className="text-xs font-mono tabular-nums text-[#665042] dark:text-[#D4C3A3]">
-                  {exam.structured.length} questions · 15 marks total
-                </p>
-              </div>
+                    <span>Section A: {exam.mcqs.length} MCQs</span>
+                    <span className="font-mono text-xs opacity-85 tabular-nums">
+                      {mcqAnsweredCount}/{exam.mcqs.length}
+                    </span>
+                  </button>
 
-              <div className="space-y-5">
-                {exam.structured.map((sq, idx) => {
-                  const gradeForQ = grading?.results.find((r) => r.id === sq.id);
-                  return (
-                    <StructuredCard
-                      key={sq.id}
-                      question={sq}
-                      index={idx}
-                      total={exam.structured.length}
-                      answer={structuredAnswers[sq.id] ?? ''}
-                      grade={gradeForQ}
-                      eli12={eli12Map[sq.id]}
-                      isLoadingEli12={Boolean(eli12Loading[sq.id])}
-                      eli12Status={eli12Status[sq.id]}
-                      eli12Error={eli12Errors[sq.id]}
-                      isGrading={isGrading}
-                      onAnswerChange={(val) =>
-                        setStructuredAnswers((prev) => ({ ...prev, [sq.id]: val }))
-                      }
-                      onRequestEli12={() =>
-                        handleRequestEli12({
-                          id: sq.id,
-                          question: sq.question,
-                          concept: sq.concept,
-                          correctOrModelAnswer:
-                            gradeForQ?.modelAnswer || 'See lecture material concept.',
-                          studentAttempt: structuredAnswers[sq.id],
-                        })
-                      }
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={activeSection === 'B'}
+                    onClick={() => switchSection('B')}
+                    className={`flex items-center justify-between gap-2 rounded-xl px-4 py-3 text-left text-xs sm:text-sm font-semibold transition-colors min-h-[46px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8B5A2B] dark:focus-visible:ring-[#C29B61] ${
+                      activeSection === 'B'
+                        ? 'bg-[#5C4033] dark:bg-[#C29B61] text-white dark:text-[#1E1510] shadow-sm'
+                        : 'text-[#5C4033] dark:text-[#E8DEC8] hover:bg-[#EFE8DC] dark:hover:bg-[#38291E]'
+                    }`}
+                  >
+                    <span>Section B: {exam.fillInBlanks.length} Fill-in-the-Blanks</span>
+                    <span className="font-mono text-xs opacity-85 tabular-nums">
+                      {fillBlanksChecked
+                        ? `${fillBlanksScore}/${exam.fillInBlanks.length}`
+                        : `${Object.keys(fillBlankPlacements).length}/${exam.fillInBlanks.length}`}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={activeSection === 'C'}
+                    onClick={() => switchSection('C')}
+                    className={`flex items-center justify-between gap-2 rounded-xl px-4 py-3 text-left text-xs sm:text-sm font-semibold transition-colors min-h-[46px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8B5A2B] dark:focus-visible:ring-[#C29B61] ${
+                      activeSection === 'C'
+                        ? 'bg-[#5C4033] dark:bg-[#C29B61] text-white dark:text-[#1E1510] shadow-sm'
+                        : 'text-[#5C4033] dark:text-[#E8DEC8] hover:bg-[#EFE8DC] dark:hover:bg-[#38291E]'
+                    }`}
+                  >
+                    <span>Section C: {exam.structured.length} Short Answers</span>
+                    <span className="font-mono text-xs opacity-85 tabular-nums">
+                      {grading ? 'Graded' : `${exam.structured.length} Qs`}
+                    </span>
+                  </button>
+                </div>
+
+                {/* Active Section A: Paginated 5 MCQs per Page */}
+                {activeSection === 'A' && (
+                  <section id="section-a" aria-labelledby="section-a-heading" className="space-y-5 scroll-mt-24">
+                    <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3 pb-4 border-b border-[#D8CBB8] dark:border-[#4A3528]">
+                      <div>
+                        <h2
+                          id="section-a-heading"
+                          className="font-display text-xl sm:text-2xl font-semibold text-[#5C4033] dark:text-[#E8DEC8]"
+                        >
+                          Section A · Multiple Choice
+                        </h2>
+                        <p className="mt-1 text-sm text-[#665042] dark:text-[#D4C3A3]">
+                          Showing 5 questions per page (Page {safeMcqPage} of {totalMcqPages}). Click an option for instant feedback.
+                        </p>
+                      </div>
+
+                      {/* Live MCQ Score Counter + Combo Streak */}
+                      <div
+                        aria-live="polite"
+                        className="inline-flex flex-wrap items-center gap-3 rounded-xl border border-[#D8CBB8] dark:border-[#4A3528] bg-[#FAF7F2] dark:bg-[#2B1E17] px-4 py-2.5 text-xs sm:text-sm font-mono tabular-nums self-start sm:self-auto shrink-0"
+                      >
+                        <span className="font-semibold text-[#5C4033] dark:text-[#C29B61]">
+                          Score: {mcqCorrectCount} / {exam.mcqs.length}
+                        </span>
+                        <span aria-hidden="true" className="text-[#BFA98E] dark:text-[#6B503E]">·</span>
+                        <span className="text-[#2C1E16] dark:text-[#E8DEC8]">
+                          {mcqAnsweredCount} / {exam.mcqs.length} Answered
+                        </span>
+                        {(comboStreak > 0 || mcqAnsweredCount > 0) && (
+                          <>
+                            <span aria-hidden="true" className="text-[#BFA98E] dark:text-[#6B503E]">·</span>
+                            <span
+                              className={
+                                comboStreak >= 1
+                                  ? 'font-semibold text-[#8B5A2B] dark:text-[#C29B61]'
+                                  : 'text-[#665042] dark:text-[#D4C3A3]'
+                              }
+                            >
+                              {comboStreak}x Streak {comboStreak >= 1 ? '🔥' : ''}
+                            </span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+
+                    {bossBattleEnabled && (
+                      <BossBattleBar
+                        timeLeft={bossTimeLeft}
+                        isRunning={bossRunning}
+                        hasFinished={bossFinished}
+                        correctCount={mcqCorrectCount}
+                        answeredCount={mcqAnsweredCount}
+                        totalQuestions={exam.mcqs.length}
+                        personalBest={bossPersonalBest}
+                        isNewRecord={bossIsNewRecord}
+                        onStartOrRestart={handleStartOrRestartBossBattle}
+                      />
+                    )}
+
+                    {pagedMcqEntries.length > 0 ? (
+                      <div className="space-y-4">
+                        {pagedMcqEntries.map(({ q: mcq, idx }) => (
+                          <McqCard
+                            key={mcq.id}
+                            question={mcq}
+                            index={idx}
+                            total={exam.mcqs.length}
+                            selectedOptionIndex={mcqAnswers[mcq.id]}
+                            eli12={eli12Map[mcq.id]}
+                            isLoadingEli12={Boolean(eli12Loading[mcq.id])}
+                            eli12Status={eli12Status[mcq.id]}
+                            eli12Error={eli12Errors[mcq.id]}
+                            onSelectOption={(optIdx) => handleSelectMcqOption(mcq.id, optIdx)}
+                            onFocusQuestion={() => {
+                              focusedQuestionIdRef.current = mcq.id;
+                            }}
+                            onRequestEli12={() =>
+                              handleRequestEli12({
+                                id: mcq.id,
+                                question: mcq.question,
+                                concept: mcq.concept,
+                                correctOrModelAnswer: `${mcq.options[mcq.correctIndex]} — ${mcq.explanation}`,
+                                studentAttempt:
+                                  mcqAnswers[mcq.id] !== undefined
+                                    ? mcq.options[mcqAnswers[mcq.id]]
+                                    : undefined,
+                              })
+                            }
+                          />
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="rounded-2xl border border-[#D8CBB8] dark:border-[#4A3528] bg-[#FAF7F2] dark:bg-[#2B1E17] p-6 text-center space-y-2">
+                        <p className="text-sm font-medium text-[#2C1E16] dark:text-[#E8DEC8]">
+                          No wrong answers to review yet.
+                        </p>
+                        <p className="text-xs text-[#665042] dark:text-[#D4C3A3]">
+                          {mcqAnsweredCount === 0
+                            ? 'Answer questions above, then toggle this filter to review missed concepts.'
+                            : `You have answered ${mcqAnsweredCount} question${mcqAnsweredCount === 1 ? '' : 's'} with zero mistakes so far.`}
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Compact 5-Question Pagination Bar */}
+                    {totalMcqPages > 1 && (
+                      <div className="rounded-xl border border-[#D8CBB8] dark:border-[#4A3528] bg-[#FAF7F2] dark:bg-[#2B1E17] px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+                        <button
+                          type="button"
+                          disabled={safeMcqPage <= 1}
+                          onClick={() => {
+                            setMcqPage((p) => Math.max(1, p - 1));
+                            focusedQuestionIdRef.current = null;
+                            document.getElementById('section-a')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                          }}
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-[#D8CBB8] dark:border-[#4A3528] bg-[#F4EFE6] dark:bg-[#1E1510] px-3.5 py-2 text-xs sm:text-sm font-medium text-[#5C4033] dark:text-[#E8DEC8] hover:bg-[#EFE8DC] dark:hover:bg-[#38291E] disabled:opacity-45 disabled:cursor-not-allowed transition-colors min-h-[40px]"
+                        >
+                          <ArrowLeft className="h-4 w-4" />
+                          <span>Prev</span>
+                        </button>
+
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="mr-2 text-xs font-mono tabular-nums text-[#665042] dark:text-[#D4C3A3]">
+                            Page {safeMcqPage} of {totalMcqPages}
+                          </span>
+                          {Array.from({ length: totalMcqPages }, (_, i) => i + 1).map((pageNum) => (
+                            <button
+                              key={pageNum}
+                              type="button"
+                              onClick={() => {
+                                setMcqPage(pageNum);
+                                focusedQuestionIdRef.current = null;
+                                document.getElementById('section-a')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                              }}
+                              aria-label={`Go to Section A page ${pageNum}`}
+                              aria-current={pageNum === safeMcqPage ? 'page' : undefined}
+                              className={`h-8 w-8 rounded-lg border text-xs font-mono tabular-nums font-semibold transition-colors ${
+                                pageNum === safeMcqPage
+                                  ? 'border-[#5C4033] dark:border-[#C29B61] bg-[#5C4033] dark:bg-[#C29B61] text-white dark:text-[#1E1510]'
+                                  : 'border-[#D8CBB8] dark:border-[#4A3528] bg-[#F4EFE6] dark:bg-[#1E1510] text-[#5C4033] dark:text-[#E8DEC8] hover:bg-[#EFE8DC] dark:hover:bg-[#38291E]'
+                              }`}
+                            >
+                              {pageNum}
+                            </button>
+                          ))}
+                        </div>
+
+                        <button
+                          type="button"
+                          disabled={safeMcqPage >= totalMcqPages}
+                          onClick={() => {
+                            setMcqPage((p) => Math.min(totalMcqPages, p + 1));
+                            focusedQuestionIdRef.current = null;
+                            document.getElementById('section-a')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                          }}
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-[#D8CBB8] dark:border-[#4A3528] bg-[#F4EFE6] dark:bg-[#1E1510] px-3.5 py-2 text-xs sm:text-sm font-medium text-[#5C4033] dark:text-[#E8DEC8] hover:bg-[#EFE8DC] dark:hover:bg-[#38291E] disabled:opacity-45 disabled:cursor-not-allowed transition-colors min-h-[40px]"
+                        >
+                          <span>Next</span>
+                          <ArrowRight className="h-4 w-4" />
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Bottom Wrong Answers Filter + Next Section CTA */}
+                    <div className="rounded-xl border border-[#D8CBB8] dark:border-[#4A3528] bg-[#FAF7F2] dark:bg-[#2B1E17] px-4 py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div className="flex flex-wrap items-center gap-3">
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={showOnlyWrongMcqs}
+                          onClick={() => {
+                            setShowOnlyWrongMcqs((prev) => !prev);
+                            setMcqPage(1);
+                            focusedQuestionIdRef.current = null;
+                          }}
+                          className={`inline-flex items-center justify-center gap-2 rounded-lg border px-3.5 py-2 text-xs sm:text-sm font-medium transition-colors whitespace-nowrap shrink-0 min-h-[42px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8B5A2B] dark:focus-visible:ring-[#C29B61] ${
+                            showOnlyWrongMcqs
+                              ? 'border-[#C57463] dark:border-[#A85B4C] bg-[#F9EBE7] dark:bg-[#3A221D] text-[#7A2E20] dark:text-[#F4DFDA] hover:bg-[#F3D8D1] dark:hover:bg-[#4B2C25]'
+                              : 'border-[#D8CBB8] dark:border-[#4A3528] bg-[#F4EFE6] dark:bg-[#1E1510] text-[#2C1E16] dark:text-[#E8DEC8] hover:bg-[#EFE8DC] dark:hover:bg-[#38291E]'
+                          }`}
+                        >
+                          <span>{showOnlyWrongMcqs ? 'Showing Only Wrong Answers' : 'Show Only Wrong Answers'}</span>
+                          <span className="font-mono tabular-nums text-xs opacity-80">
+                            ({wrongMcqEntries.length})
+                          </span>
+                        </button>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => switchSection('B')}
+                        className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#5C4033] dark:bg-[#C29B61] px-5 py-2.5 text-xs sm:text-sm font-semibold text-white dark:text-[#1E1510] hover:bg-[#8B5A2B] dark:hover:bg-[#A67B5B] transition-colors whitespace-nowrap shrink-0 min-h-[44px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8B5A2B] dark:focus-visible:ring-[#C29B61]"
+                      >
+                        <span>Next Section: Section B</span>
+                        <ArrowRight className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </section>
+                )}
+
+                {/* Active Section B: 10 Fill-in-the-Blanks with Word Bank */}
+                {activeSection === 'B' && (
+                  <div className="space-y-5">
+                    <FillInBlanksSection
+                      questions={exam.fillInBlanks ?? []}
+                      wordBank={exam.wordBank ?? []}
+                      placements={fillBlankPlacements}
+                      isChecked={fillBlanksChecked}
+                      onPlaceChip={handlePlaceFillBlankChip}
+                      onRemoveChip={handleRemoveFillBlankChip}
+                      onCheckAnswers={handleCheckFillBlanks}
+                      onFocusQuestion={(qId) => {
+                        focusedQuestionIdRef.current = qId;
+                      }}
                     />
-                  );
-                })}
-              </div>
 
-              {/* 3. AI Lecturer Grader CTA */}
-              <div className="rounded-2xl border border-[#D8CBB8] dark:border-[#4A3528] bg-[#FAF7F2] dark:bg-[#2B1E17] p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <div className="space-y-1">
-                  <p className="font-display text-base font-semibold text-[#5C4033] dark:text-[#E8DEC8]">
-                    {grading ? 'Re-evaluate Updated Answers' : 'Ready for Lecturer Marking?'}
-                  </p>
-                  <p className="text-sm text-[#665042] dark:text-[#D4C3A3]">
-                    Grades each structured answer out of 5 marks, identifies missing key terms, and builds your total score summary.
-                  </p>
-                  {isGrading && gradeStatus && (
-                    <p role="status" className="pt-1 text-xs text-[#8B5A2B] dark:text-[#C29B61]">
-                      {gradeStatus}
-                    </p>
-                  )}
-                  {gradeError && (
-                    <p role="alert" className="pt-1 text-xs text-[#7A2E20] dark:text-[#E59B8C]">
-                      {gradeError}
-                    </p>
-                  )}
-                </div>
+                    <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+                      <button
+                        type="button"
+                        onClick={() => switchSection('A')}
+                        className="inline-flex items-center gap-2 rounded-xl border border-[#D8CBB8] dark:border-[#4A3528] bg-[#FAF7F2] dark:bg-[#2B1E17] px-4 py-2.5 text-xs sm:text-sm font-medium text-[#5C4033] dark:text-[#E8DEC8] hover:bg-[#EFE8DC] dark:hover:bg-[#38291E] transition-colors min-h-[44px]"
+                      >
+                        <ArrowLeft className="h-4 w-4" />
+                        <span>Back to Section A</span>
+                      </button>
 
-                <button
-                  type="button"
-                  disabled={isGrading}
-                  onClick={handleGradeStructured}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#5C4033] dark:bg-[#C29B61] px-5 py-3 text-sm font-semibold text-white dark:text-[#1E1510] hover:bg-[#8B5A2B] dark:hover:bg-[#A67B5B] disabled:opacity-60 disabled:cursor-not-allowed transition-colors whitespace-nowrap shrink-0 min-h-[48px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8B5A2B] dark:focus-visible:ring-[#C29B61]"
-                >
-                  {isGrading ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      <span>Grading Answers...</span>
-                    </>
-                  ) : (
-                    <>
-                      <CheckCheck className="h-4 w-4" />
-                      <span>Grade My Structured Answers</span>
-                    </>
-                  )}
-                </button>
-              </div>
-            </section>
+                      <button
+                        type="button"
+                        onClick={() => switchSection('C')}
+                        className="inline-flex items-center gap-2 rounded-xl bg-[#5C4033] dark:bg-[#C29B61] px-5 py-2.5 text-xs sm:text-sm font-semibold text-white dark:text-[#1E1510] hover:bg-[#8B5A2B] dark:hover:bg-[#A67B5B] transition-colors min-h-[44px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8B5A2B] dark:focus-visible:ring-[#C29B61]"
+                      >
+                        <span>Next Section: Section C</span>
+                        <ArrowRight className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Active Section C: Structured / Short-Answer (3 Questions) */}
+                {activeSection === 'C' && (
+                  <section id="section-c" aria-labelledby="section-c-heading" className="space-y-5 scroll-mt-24">
+                    <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-2 pb-3 border-b border-[#D8CBB8] dark:border-[#4A3528]">
+                      <div>
+                        <h2
+                          id="section-c-heading"
+                          className="font-display text-xl sm:text-2xl font-semibold text-[#5C4033] dark:text-[#E8DEC8]"
+                        >
+                          Section C · Structured Short Answer
+                        </h2>
+                        <p className="mt-1 text-sm text-[#665042] dark:text-[#D4C3A3]">
+                          Type your responses below, then submit to the AI Lecturer for 5-mark rubric grading.
+                        </p>
+                      </div>
+                      <p className="text-xs font-mono tabular-nums text-[#665042] dark:text-[#D4C3A3]">
+                        {exam.structured.length} questions · 15 marks total
+                      </p>
+                    </div>
+
+                    <div className="space-y-5">
+                      {exam.structured.map((sq, idx) => {
+                        const gradeForQ = grading?.results.find((r) => r.id === sq.id);
+                        return (
+                          <StructuredCard
+                            key={sq.id}
+                            question={sq}
+                            index={idx}
+                            total={exam.structured.length}
+                            answer={structuredAnswers[sq.id] ?? ''}
+                            grade={gradeForQ}
+                            eli12={eli12Map[sq.id]}
+                            isLoadingEli12={Boolean(eli12Loading[sq.id])}
+                            eli12Status={eli12Status[sq.id]}
+                            eli12Error={eli12Errors[sq.id]}
+                            isGrading={isGrading}
+                            onAnswerChange={(val) =>
+                              setStructuredAnswers((prev) => ({ ...prev, [sq.id]: val }))
+                            }
+                            onFocusQuestion={() => {
+                              focusedQuestionIdRef.current = sq.id;
+                            }}
+                            onRequestEli12={() =>
+                              handleRequestEli12({
+                                id: sq.id,
+                                question: sq.question,
+                                concept: sq.concept,
+                                correctOrModelAnswer:
+                                  gradeForQ?.modelAnswer || 'See lecture material concept.',
+                                studentAttempt: structuredAnswers[sq.id],
+                              })
+                            }
+                          />
+                        );
+                      })}
+                    </div>
+
+                    {/* 3. AI Lecturer Grader CTA */}
+                    <div className="rounded-2xl border border-[#D8CBB8] dark:border-[#4A3528] bg-[#FAF7F2] dark:bg-[#2B1E17] p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                      <div className="space-y-1">
+                        <p className="font-display text-base font-semibold text-[#5C4033] dark:text-[#E8DEC8]">
+                          {grading ? 'Re-evaluate Updated Answers' : 'Ready for Lecturer Marking?'}
+                        </p>
+                        <p className="text-sm text-[#665042] dark:text-[#D4C3A3]">
+                          Grades each structured answer out of 5 marks, identifies missing key terms, and builds your total score summary.
+                        </p>
+                        {isGrading && gradeStatus && (
+                          <p role="status" className="pt-1 text-xs text-[#8B5A2B] dark:text-[#C29B61]">
+                            {gradeStatus}
+                          </p>
+                        )}
+                        {gradeError && (
+                          <p role="alert" className="pt-1 text-xs text-[#7A2E20] dark:text-[#E59B8C]">
+                            {gradeError}
+                          </p>
+                        )}
+                      </div>
+
+                      <button
+                        type="button"
+                        disabled={isGrading}
+                        onClick={handleGradeStructured}
+                        className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#5C4033] dark:bg-[#C29B61] px-5 py-3 text-sm font-semibold text-white dark:text-[#1E1510] hover:bg-[#8B5A2B] dark:hover:bg-[#A67B5B] disabled:opacity-60 disabled:cursor-not-allowed transition-colors whitespace-nowrap shrink-0 min-h-[48px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8B5A2B] dark:focus-visible:ring-[#C29B61]"
+                      >
+                        {isGrading ? (
+                          <>
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            <span>Grading Answers...</span>
+                          </>
+                        ) : (
+                          <>
+                            <CheckCheck className="h-4 w-4" />
+                            <span>Grade My Structured Answers</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+
+                    <div className="flex items-center justify-start pt-1">
+                      <button
+                        type="button"
+                        onClick={() => switchSection('B')}
+                        className="inline-flex items-center gap-2 rounded-xl border border-[#D8CBB8] dark:border-[#4A3528] bg-[#FAF7F2] dark:bg-[#2B1E17] px-4 py-2.5 text-xs sm:text-sm font-medium text-[#5C4033] dark:text-[#E8DEC8] hover:bg-[#EFE8DC] dark:hover:bg-[#38291E] transition-colors min-h-[44px]"
+                      >
+                        <ArrowLeft className="h-4 w-4" />
+                        <span>Back to Section B</span>
+                      </button>
+                    </div>
+                  </section>
+                )}
+              </>
+            )}
           </div>
         )}
       </main>
@@ -1046,7 +1475,11 @@ export default function App() {
 
       <ConfettiBurst burstKey={confettiBurstKey} />
       <ScoreCelebrationModal data={scoreModal} onClose={() => setScoreModal(null)} />
-      <StudyMascot reaction={mascotReaction} />
+      <StudyMascot
+        reaction={mascotReaction}
+        hasActiveExam={Boolean(exam)}
+        onRequestClue={getActiveZabellClue}
+      />
     </div>
   );
 }

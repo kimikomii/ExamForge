@@ -23,16 +23,12 @@ const DIFFICULTY_OPTIONS: {
   summary: string;
 }[] = [
   {
-    value: 'Standard Diploma Level',
-    summary: 'Balanced recall, conceptual clarity, and standard applied coursework scenarios.',
+    value: 'Standard Mock Exam',
+    summary: 'Full 3-section mock exam: 20 MCQs, 10 fill-in-the-blanks, and 3 short-answer questions.',
   },
   {
-    value: 'Hard / Tricky',
-    summary: 'Subtle MCQ distractors, edge-case traps, and multi-step analytical questions.',
-  },
-  {
-    value: 'Quick Revision',
-    summary: 'High-yield core definitions and fundamental checks for fast pre-exam review.',
+    value: 'Quick Revision (15 Sticky-Note Cards)',
+    summary: '15 sticky-note cue cards focused on core definitions and key facts (skips Sections B & C).',
   },
 ];
 
@@ -180,11 +176,10 @@ export function StudyInputSection({
             id="input-heading"
             className="font-display text-xl sm:text-2xl font-semibold tracking-tight text-[#5C4033] dark:text-[#E8DEC8]"
           >
-            Lecture Material Input
+            Step 1: Drop Your Notes Here 📚
           </h2>
           <p className="mt-1.5 text-sm text-[#665042] dark:text-[#D4C3A3] max-w-2xl leading-relaxed">
-            Upload a lecture PDF or paste your study notes below. ExamForge builds a tailored
-            33-question mock exam across objective MCQs, fill-in-the-blanks, and structured answers.
+            Upload a lecture PDF or paste your study notes below. ExamForge will build a 3-part practice test (20 Quick Quizzes, 10 Fill-in-the-Blanks, and 3 Short Answers) to get you ready for exam day!
           </p>
         </div>
 
@@ -439,23 +434,50 @@ export function StudyInputSection({
             </div>
 
             <div className="pt-4 border-t border-[#D8CBB8] dark:border-[#4A3528] space-y-2.5 text-xs text-[#665042] dark:text-[#D4C3A3]">
-              <p className="font-medium text-[#2C1E16] dark:text-[#E8DEC8]">Generated Exam Blueprint</p>
-              <div className="flex items-center justify-between">
-                <span>Section A · Objective MCQ</span>
-                <span className="font-mono tabular-nums text-[#2C1E16] dark:text-[#E8DEC8]">20 questions</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span>Section B · Fill-in-the-Blanks</span>
-                <span className="font-mono tabular-nums text-[#2C1E16] dark:text-[#E8DEC8]">10 questions</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span>Section C · Short Answer</span>
-                <span className="font-mono tabular-nums text-[#2C1E16] dark:text-[#E8DEC8]">3 × 5 marks</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span>Study Boosters</span>
-                <span className="font-mono text-[#2C1E16] dark:text-[#E8DEC8]">AI Grader + ELI12</span>
-              </div>
+              <p className="font-medium text-[#2C1E16] dark:text-[#E8DEC8]">
+                {difficulty === 'Quick Revision (15 Sticky-Note Cards)'
+                  ? 'Quick Revision Blueprint'
+                  : 'Generated Exam Blueprint'}
+              </p>
+              {difficulty === 'Quick Revision (15 Sticky-Note Cards)' ? (
+                <>
+                  <div className="flex items-center justify-between">
+                    <span>Sticky-Note Cue Cards</span>
+                    <span className="font-mono tabular-nums text-[#2C1E16] dark:text-[#E8DEC8]">15 MCQs</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span>Focus</span>
+                    <span className="font-mono text-[#2C1E16] dark:text-[#E8DEC8]">Core facts</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span>Sections B &amp; C</span>
+                    <span className="font-mono text-[#2C1E16] dark:text-[#E8DEC8]">Skipped</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span>Study Boosters</span>
+                    <span className="font-mono text-[#2C1E16] dark:text-[#E8DEC8]">Instant + ELI12</span>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="flex items-center justify-between">
+                    <span>Section A · Objective MCQ</span>
+                    <span className="font-mono tabular-nums text-[#2C1E16] dark:text-[#E8DEC8]">20 questions</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span>Section B · Fill-in-the-Blanks</span>
+                    <span className="font-mono tabular-nums text-[#2C1E16] dark:text-[#E8DEC8]">10 questions</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span>Section C · Short Answer</span>
+                    <span className="font-mono tabular-nums text-[#2C1E16] dark:text-[#E8DEC8]">3 × 5 marks</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span>Study Boosters</span>
+                    <span className="font-mono text-[#2C1E16] dark:text-[#E8DEC8]">AI Grader + ELI12</span>
+                  </div>
+                </>
+              )}
             </div>
           </div>
 

@@ -140,25 +140,170 @@ function formatGeminiError(err: unknown): { status: number; message: string } {
   };
 }
 
+function escapeControlCharsInJsonStrings(input: string): string {
+  let out = '';
+  let inString = false;
+  let escaped = false;
+
+  for (let i = 0; i < input.length; i++) {
+    const ch = input[i];
+    if (inString) {
+      if (escaped) {
+        out += ch;
+        escaped = false;
+        continue;
+      }
+      if (ch === '\\') {
+        out += ch;
+        escaped = true;
+        continue;
+      }
+      if (ch === '"') {
+        out += ch;
+        inString = false;
+        continue;
+      }
+      if (ch === '\n') {
+        out += '\\n';
+        continue;
+      }
+      if (ch === '\r') {
+        out += '\\r';
+        continue;
+      }
+      if (ch === '\t') {
+        out += '\\t';
+        continue;
+      }
+      const code = ch.charCodeAt(0);
+      if (code < 0x20) {
+        out += ' ';
+        continue;
+      }
+      out += ch;
+    } else {
+      if (ch === '"') {
+        inString = true;
+      }
+      out += ch;
+    }
+  }
+
+  return out;
+}
+
+function repairTruncatedJson(input: string): string | null {
+  const start = input.indexOf('{');
+  if (start === -1) return null;
+  const slice = input.slice(start);
+
+  const stack: Array<'{' | '['> = [];
+  const commaCheckpoints: Array<{ index: number; stack: Array<'{' | '['> }> = [];
+  let inString = false;
+  let escaped = false;
+
+  for (let i = 0; i < slice.length; i++) {
+    const ch = slice[i];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (ch === '\\') {
+        escaped = true;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = true;
+    } else if (ch === '{' || ch === '[') {
+      stack.push(ch);
+    } else if (ch === '}' || ch === ']') {
+      stack.pop();
+    } else if (ch === ',' && stack.length > 0) {
+      commaCheckpoints.push({ index: i, stack: [...stack] });
+    }
+  }
+
+  // First try simple closure if truncation occurred inside a string value
+  if (inString) {
+    const suffix = (escaped ? '\\' : '') + '"' + stack.slice().reverse().map((c) => (c === '{' ? '}' : ']')).join('');
+    try {
+      const candidate = slice + suffix;
+      JSON.parse(candidate);
+      return candidate;
+    } catch {
+      // Fall through to comma checkpoint rollback
+    }
+  }
+
+  // Otherwise roll back to the latest safe comma boundary and close remaining containers
+  for (let i = commaCheckpoints.length - 1; i >= 0; i--) {
+    const cp = commaCheckpoints[i];
+    const candidate =
+      slice.slice(0, cp.index) +
+      cp.stack
+        .slice()
+        .reverse()
+        .map((c) => (c === '{' ? '}' : ']'))
+        .join('');
+    try {
+      JSON.parse(candidate);
+      return candidate;
+    } catch {
+      // Try earlier checkpoint
+    }
+  }
+
+  return null;
+}
+
 function safeParseJson<T>(rawText: string | undefined): T {
   const trimmed = (rawText ?? '{}').trim();
-  const cleaned = trimmed
+  const unfenced = trimmed
     .replace(/^```(?:json)?\s*/i, '')
     .replace(/\s*```$/i, '')
     .trim();
-  return JSON.parse(cleaned) as T;
+
+  const firstBrace = unfenced.indexOf('{');
+  const lastBrace = unfenced.lastIndexOf('}');
+  const cleaned =
+    firstBrace !== -1 && lastBrace > firstBrace
+      ? unfenced.slice(firstBrace, lastBrace + 1)
+      : firstBrace !== -1
+        ? unfenced.slice(firstBrace)
+        : unfenced;
+
+  try {
+    return JSON.parse(cleaned) as T;
+  } catch (firstErr) {
+    const sanitized = escapeControlCharsInJsonStrings(cleaned);
+    try {
+      return JSON.parse(sanitized) as T;
+    } catch {
+      const repaired = repairTruncatedJson(sanitized);
+      if (repaired) {
+        return JSON.parse(repaired) as T;
+      }
+      throw firstErr;
+    }
+  }
 }
 
-async function generateContentWithFallback(params: {
+async function generateJsonWithFallback<T>(params: {
   ai: GoogleGenAI;
   contents: { parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> };
   config: Record<string, any>;
-}) {
+}): Promise<T> {
   const { ai, contents, config } = params;
   let lastError: unknown;
+  let bestPartialResult: T | undefined;
 
   for (let i = 0; i < MODEL_FALLBACK_CHAIN.length; i++) {
     const model = MODEL_FALLBACK_CHAIN[i];
+    const hasFallback = Boolean(MODEL_FALLBACK_CHAIN[i + 1]);
+
     try {
       const response = await ai.models.generateContent({
         model,
@@ -166,9 +311,9 @@ async function generateContentWithFallback(params: {
         config,
       });
 
+      const finishReason = response.candidates?.[0]?.finishReason ?? 'UNKNOWN';
       const rawText = response.text?.trim();
       if (!rawText) {
-        const finishReason = response.candidates?.[0]?.finishReason ?? 'UNKNOWN';
         console.error(
           `[Gemini] ${model} returned empty text. candidates[0].finishReason=${finishReason}`,
           JSON.stringify(response.candidates?.[0] ?? null)
@@ -178,13 +323,33 @@ async function generateContentWithFallback(params: {
         ) as Error & { status?: number };
         emptyErr.status = 502;
         lastError = emptyErr;
-        if (MODEL_FALLBACK_CHAIN[i + 1]) {
+        if (hasFallback) {
           continue;
         }
         throw emptyErr;
       }
 
-      return response;
+      try {
+        const parsed = safeParseJson<T>(rawText);
+        if (finishReason === 'MAX_TOKENS' && hasFallback) {
+          console.warn(
+            `[Gemini] ${model} hit MAX_TOKENS (finishReason=${finishReason}). Falling back to ${MODEL_FALLBACK_CHAIN[i + 1]}.`
+          );
+          bestPartialResult = parsed;
+          continue;
+        }
+        return parsed;
+      } catch (parseErr) {
+        console.error(
+          `[Gemini] ${model} returned invalid JSON (finishReason=${finishReason}):`,
+          parseErr instanceof Error ? parseErr.message : parseErr
+        );
+        lastError = parseErr;
+        if (hasFallback) {
+          continue;
+        }
+        throw parseErr;
+      }
     } catch (err) {
       lastError = err;
       const nextModel = MODEL_FALLBACK_CHAIN[i + 1];
@@ -194,8 +359,15 @@ async function generateContentWithFallback(params: {
         );
         continue;
       }
+      if (bestPartialResult !== undefined) {
+        return bestPartialResult;
+      }
       throw err;
     }
+  }
+
+  if (bestPartialResult !== undefined) {
+    return bestPartialResult;
   }
 
   throw lastError;
@@ -223,7 +395,7 @@ async function startServer() {
       sourceType,
       notesText,
       pdfBase64,
-      difficulty = 'Standard Diploma Level',
+      difficulty = 'Standard Mock Exam',
       previousQuestions = [],
     } = req.body as {
       sourceType: 'text' | 'pdf';
@@ -244,28 +416,89 @@ async function startServer() {
 
     await handleJsonRoute(res, async () => {
       const ai = getGeminiClient();
-
-      const difficultyGuidance =
-        difficulty === 'Hard / Tricky'
-          ? 'Hard/Tricky: subtle distractors, edge cases, multi-step analysis.'
-          : difficulty === 'Quick Revision'
-            ? 'Quick Revision: concise high-yield core definitions and recall checks.'
-            : 'Standard Diploma Level: balanced recall and applied scenarios.';
+      const isQuickRevision = difficulty.toLowerCase().includes('quick revision');
 
       const avoidClause =
         Array.isArray(previousQuestions) && previousQuestions.length > 0
           ? `\nAvoid repeating these prior questions:\n${previousQuestions.map((q, idx) => `${idx + 1}. ${q}`).join('\n')}`
           : '';
 
-      const prompt = `Create a comprehensive 3-section mock exam strictly from the lecture material (${difficultyGuidance}).${avoidClause}
-Return JSON matching the schema:
+      if (isQuickRevision) {
+        const quickPrompt = `Create a Quick Revision flash-quiz deck strictly from the lecture material focusing on core definitions and key facts.${avoidClause}
+Return compact valid JSON matching the schema:
 - topicTitle: 3-6 word topic title
 - sourceSummary: 1 concise overview sentence
-- mcqs (Section A): exactly 20 distinct objective multiple-choice questions covering all key topics; 4 clean option strings each (no A/B/C/D prefixes); correctIndex (0-3); explanation (concise 1 sentence); concept (2-4 words)
-- fillInBlanks (Section B): exactly 10 distinct fill-in-the-blank sentences; each "sentence" must contain exactly one "___" placeholder for the missing key term; "answer" is the exact missing 1-3 word key term; "concept" (2-4 words)
-- structured (Section C): exactly 3 short-answer/scenario questions (5 marks each); contextTag (2-3 words e.g. Applied Scenario); concept (2-4 words)`;
+- mcqs: exactly 15 distinct multiple-choice cue-card questions covering core definitions and high-yield key facts; 4 concise option strings each (no A/B/C/D prefixes); correctIndex (0-3); explanation (1 crisp sentence, max 18 words); concept (2-4 words); hint (1 brief study clue under 12 words without giving away the answer)`;
 
-      const response = await generateContentWithFallback({
+        const parsed = await generateJsonWithFallback<any>({
+          ai,
+          contents: {
+            parts: buildSourceParts(sourceType, notesText, pdfBase64, quickPrompt),
+          },
+          config: {
+            systemInstruction:
+              'You are a concise university lecturer. Output compact, valid JSON grounded strictly in the provided material.',
+            maxOutputTokens: 16384,
+            responseMimeType: 'application/json',
+            responseSchema: {
+              type: Type.OBJECT,
+              required: ['topicTitle', 'sourceSummary', 'mcqs'],
+              properties: {
+                topicTitle: { type: Type.STRING },
+                sourceSummary: { type: Type.STRING },
+                mcqs: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    required: ['question', 'options', 'correctIndex', 'explanation', 'concept', 'hint'],
+                    properties: {
+                      question: { type: Type.STRING },
+                      options: {
+                        type: Type.ARRAY,
+                        items: { type: Type.STRING },
+                      },
+                      correctIndex: { type: Type.INTEGER },
+                      explanation: { type: Type.STRING },
+                      concept: { type: Type.STRING },
+                      hint: { type: Type.STRING },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        });
+
+        const mcqs = (parsed.mcqs ?? []).slice(0, 15).map((q: any, i: number) => ({
+          id: `mcq-${i + 1}`,
+          question: String(q.question ?? ''),
+          options: Array.isArray(q.options) ? q.options.slice(0, 4).map(String) : [],
+          correctIndex: Math.min(3, Math.max(0, Number(q.correctIndex ?? 0))),
+          explanation: String(q.explanation ?? ''),
+          concept: String(q.concept ?? 'Core Concept'),
+          hint: String(q.hint ?? '').trim(),
+        }));
+
+        return {
+          topicTitle: String(parsed.topicTitle ?? 'Quick Revision Cue Cards'),
+          sourceSummary: String(parsed.sourceSummary ?? ''),
+          difficulty,
+          mcqs,
+          fillInBlanks: [],
+          wordBank: [],
+          structured: [],
+        };
+      }
+
+      const prompt = `Create a comprehensive 3-section mock exam strictly from the lecture material (Standard Mock Exam: balanced recall, conceptual clarity, and applied scenarios).${avoidClause}
+Return compact valid JSON matching the schema:
+- topicTitle: 3-6 word topic title
+- sourceSummary: 1 concise overview sentence
+- mcqs (Section A): exactly 20 distinct objective multiple-choice questions covering all key topics; 4 concise option strings each (no A/B/C/D prefixes); correctIndex (0-3); explanation (1 crisp sentence, max 18 words); concept (2-4 words); hint (1 brief clue under 12 words without revealing the answer)
+- fillInBlanks (Section B): exactly 10 distinct fill-in-the-blank sentences; each "sentence" must contain exactly one "___" placeholder for the missing key term; "answer" is the exact missing 1-3 word key term; "concept" (2-4 words); "hint" (1 brief clue under 12 words without naming the missing term)
+- structured (Section C): exactly 3 short-answer/scenario questions (5 marks each); contextTag (2-3 words e.g. Applied Scenario); concept (2-4 words); hint (1 brief clue under 12 words pointing to the key mechanism or principle)`;
+
+      const parsed = await generateJsonWithFallback<any>({
         ai,
         contents: {
           parts: buildSourceParts(sourceType, notesText, pdfBase64, prompt),
@@ -273,7 +506,7 @@ Return JSON matching the schema:
         config: {
           systemInstruction:
             'You are a concise university lecturer. Output compact, valid JSON grounded strictly in the provided material.',
-          maxOutputTokens: 8192,
+          maxOutputTokens: 16384,
           responseMimeType: 'application/json',
           responseSchema: {
             type: Type.OBJECT,
@@ -285,7 +518,7 @@ Return JSON matching the schema:
                 type: Type.ARRAY,
                 items: {
                   type: Type.OBJECT,
-                  required: ['question', 'options', 'correctIndex', 'explanation', 'concept'],
+                  required: ['question', 'options', 'correctIndex', 'explanation', 'concept', 'hint'],
                   properties: {
                     question: { type: Type.STRING },
                     options: {
@@ -295,6 +528,7 @@ Return JSON matching the schema:
                     correctIndex: { type: Type.INTEGER },
                     explanation: { type: Type.STRING },
                     concept: { type: Type.STRING },
+                    hint: { type: Type.STRING },
                   },
                 },
               },
@@ -302,11 +536,12 @@ Return JSON matching the schema:
                 type: Type.ARRAY,
                 items: {
                   type: Type.OBJECT,
-                  required: ['sentence', 'answer', 'concept'],
+                  required: ['sentence', 'answer', 'concept', 'hint'],
                   properties: {
                     sentence: { type: Type.STRING },
                     answer: { type: Type.STRING },
                     concept: { type: Type.STRING },
+                    hint: { type: Type.STRING },
                   },
                 },
               },
@@ -314,11 +549,12 @@ Return JSON matching the schema:
                 type: Type.ARRAY,
                 items: {
                   type: Type.OBJECT,
-                  required: ['question', 'contextTag', 'concept'],
+                  required: ['question', 'contextTag', 'concept', 'hint'],
                   properties: {
                     question: { type: Type.STRING },
                     contextTag: { type: Type.STRING },
                     concept: { type: Type.STRING },
+                    hint: { type: Type.STRING },
                   },
                 },
               },
@@ -327,8 +563,6 @@ Return JSON matching the schema:
         },
       });
 
-      const parsed = safeParseJson<any>(response.text);
-
       const mcqs = (parsed.mcqs ?? []).slice(0, 20).map((q: any, i: number) => ({
         id: `mcq-${i + 1}`,
         question: String(q.question ?? ''),
@@ -336,6 +570,7 @@ Return JSON matching the schema:
         correctIndex: Math.min(3, Math.max(0, Number(q.correctIndex ?? 0))),
         explanation: String(q.explanation ?? ''),
         concept: String(q.concept ?? 'Core Concept'),
+        hint: String(q.hint ?? '').trim(),
       }));
 
       const fillInBlanks = (parsed.fillInBlanks ?? []).slice(0, 10).map((q: any, i: number) => {
@@ -348,6 +583,7 @@ Return JSON matching the schema:
           sentence,
           answer: String(q.answer ?? '').trim(),
           concept: String(q.concept ?? 'Key Term'),
+          hint: String(q.hint ?? '').trim(),
         };
       });
 
@@ -363,6 +599,7 @@ Return JSON matching the schema:
         contextTag: String(q.contextTag ?? 'Short Answer'),
         maxMarks: 5,
         concept: String(q.concept ?? 'Key Concept'),
+        hint: String(q.hint ?? '').trim(),
       }));
 
       return {
@@ -382,7 +619,7 @@ Return JSON matching the schema:
       sourceType,
       notesText,
       pdfBase64,
-      difficulty = 'Standard Diploma Level',
+      difficulty = 'Standard Mock Exam',
       questions,
     } = req.body as {
       sourceType: 'text' | 'pdf';
@@ -419,7 +656,7 @@ Return JSON:
 - results: per question { id, score (0-5), feedback (1-2 crisp sentences), missingKeyTerms (exact omitted terms; [] if 5/5), modelAnswer (2-4 crisp sentences) }
 - overallFeedback: 1 concise summary sentence`;
 
-      const response = await generateContentWithFallback({
+      const parsed = await generateJsonWithFallback<any>({
         ai,
         contents: {
           parts: buildSourceParts(sourceType, notesText, pdfBase64, prompt),
@@ -427,6 +664,7 @@ Return JSON:
         config: {
           systemInstruction:
             'You are a concise academic lecturer grading short answers against the provided lecture material.',
+          maxOutputTokens: 8192,
           responseMimeType: 'application/json',
           responseSchema: {
             type: Type.OBJECT,
@@ -460,8 +698,6 @@ Return JSON:
           },
         },
       });
-
-      const parsed = safeParseJson<any>(response.text);
       const results = questions.map((orig, idx) => {
         const match =
           (parsed.results ?? []).find((r: any) => r.id === orig.id) ??
@@ -526,12 +762,13 @@ Return JSON: analogyTitle (3-5 words), analogy (2-3 simple jargon-free sentences
           ? buildSourceParts('pdf', notesText, pdfBase64, prompt)
           : [{ text: prompt }];
 
-      const response = await generateContentWithFallback({
+      const parsed = await generateJsonWithFallback<any>({
         ai,
         contents: { parts },
         config: {
           systemInstruction:
             'Explain academic concepts using simple everyday analogies for a 12-year-old.',
+          maxOutputTokens: 8192,
           responseMimeType: 'application/json',
           responseSchema: {
             type: Type.OBJECT,
@@ -544,8 +781,6 @@ Return JSON: analogyTitle (3-5 words), analogy (2-3 simple jargon-free sentences
           },
         },
       });
-
-      const parsed = safeParseJson<any>(response.text);
       return {
         analogyTitle: String(parsed.analogyTitle ?? 'Everyday Analogy'),
         analogy: String(parsed.analogy ?? ''),
